@@ -1,0 +1,1 @@
+self.__REACT_LOADABLE_MANIFEST='{"app/upload/page.tsx -> @/lib/api":{"id":96264,"files":[]}}';

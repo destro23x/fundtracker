@@ -1,0 +1,38 @@
+# Dependencies
+**/node_modules/*
+
+.scannerwork
+*cloc*report*.json
+*sbom*report*.json
+*vulnerabilities*report*.json
+*report*json.zip
+.version
+
+*.code-workspace
+!project.code-workspace
+
+# Please, add your custom content below!
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+**/plugin-cache/*
+**/.terraform.lock.hcl
+**/builds/*
+# MacOS
+**/.DS_Store
+# IntelliJ IDEA
+.idea/*
+### vscode ###
+.vscode/*
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.vscode/settings.json
+
+# Atmos
+infrastructure/components/terraform/*
+!infrastructure/components/terraform/local-security-groups/
+!infrastructure/components/terraform/local-acm/

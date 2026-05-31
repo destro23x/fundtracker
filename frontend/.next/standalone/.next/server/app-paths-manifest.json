@@ -1,0 +1,18 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/alerts/page": "app/alerts/page.js",
+  "/movers/page": "app/movers/page.js",
+  "/funds/[id]/page": "app/funds/[id]/page.js",
+  "/dane/page": "app/dane/page.js",
+  "/funds/page": "app/funds/page.js",
+  "/historia/page": "app/historia/page.js",
+  "/rankings/page": "app/rankings/page.js",
+  "/subfunds/[id]/page": "app/subfunds/[id]/page.js",
+  "/page": "app/page.js",
+  "/subfunds/page": "app/subfunds/page.js",
+  "/search/page": "app/search/page.js",
+  "/tfi/page": "app/tfi/page.js",
+  "/tfi/[id]/page": "app/tfi/[id]/page.js",
+  "/top/page": "app/top/page.js",
+  "/upload/page": "app/upload/page.js"
+}

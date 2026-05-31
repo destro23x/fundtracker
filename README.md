@@ -183,34 +183,104 @@ The AI parser handles most common formats including:
 - ING, PKO, Pekao fund reports
 - Any tabular format with company + position data
 
-Funkcjonalności:
-TFI mają pokazywać z listy rozwijalnej jakie mają Fundusze
-Fundusze mają pokazywać jakie podfundusze mają
 
 Pokazywanie 10 największych pozycji dla funduszu
 Alokacja sektorowa
 Ekspozycja geograficzna
 Liczba pozycji
-Obrót portfela
+Obrót portfela policz jak był obrót portfela
+Jak zmianił się skład funduszu w ciągu ostatniego roku.
+
+terraforma uaktualnij
 
 
-Wydzielic parsery aby do jakiegos wspolnego formatu sprowadzały wszystkie raporty i dopiero wtedy raport mozna byłoby wczytać do systemu. Uzytkownik moglby przejrze przegenerowany raport i zaakceptować do 
+Czy baza danych jest znormalizowana?
 
-Wspólny format, zaakceptowanie raportu
+Tak, portfolio_composition jest celowo zdenormalizowane. Konkretne naruszenia:
+
+1NF — OK (atomowe wartości, brak powtarzających się grup)
+
+2NF — naruszenie — kolumny zależą tylko od części klucza:
+
+umbrella_name, subfund_name, fund_type, izfia_id — opisują fundusz, nie pozycję
+source_filename, parsed_filename — opisują upload, nie pozycję
+3NF — naruszenie — zależności przechodnie:
+
+subfund_name → umbrella_name (nazwa subfunduszu determinuje TFI)
+isin → company_name, isin → country (ISIN determinuje emitenta i kraj)
+source_filename → snapshot_date (plik determinuje datę)
+
+Znormalizowana wersja wyglądałaby tak:
+
+tfi            (id, name)
+subfunds       (id, tfi_id FK, name, fund_type, izfia_id)  ← już istnieje
+instruments    (isin PK, company_name, country)
+uploads        (id, user_id, source_filename, snapshot_date)
+portfolio_positions (upload_id FK, subfund_id FK, isin FK,
+                     asset_type, shares, value, weight_pct,
+                     currency_fund, currency_instrument)
 
 
-Nazwa funduszu
-Nazwa subsunduszu
-Identyfikator funduszu lub subfunduszu
-Typ Funduszu
-Nazwa emitenta
-Kraj emitenta
-Kod ISIN instrumentu 
-Typ instrumentu (Akcje, instrumenty pochodne)
-Ilość instrumnetów w portfelu
-Waluta instumentu
-Waluta wyceny instumentu
-Wartość instrumentu w walucie wyceny
-Procentowy udział w wartości ogółem
+Dlaczego zdenormalizowanie jest tu OK:
 
-# fundtracker
+Dane są read-heavy, write-once — uploady są rzadkie, odczytów jest dużo
+Brak aktualizacji częściowych — cały snapshot jest zastępowany naraz
+Upraszcza parsery (każdy parser pisze jeden flat dict per pozycja)
+11 700 wierszy — żaden problem wydajnościowy
+company_name w danych funduszowych bywa niespójny między datami (ten sam ISIN, różna nazwa) — denormalizacja to zachowuje
+
+Jedyna realna wada: subfund_name jako string zamiast FK do subfunds.id — stąd potrzeba mapowania subfund_name → uuid w każdym endpoincie.
+
+
+a gdy będzie wierszy 10 milionów w portfolio_composition to czy nadal nie będzie to problem wydajnościowy ?
+
+10 milionów wierszy to granica, gdzie zaczyna mieć znaczenie — ale PostgreSQL da radę jeśli masz właściwe indeksy.
+
+Obecny stan — brak indeksów na kluczowych kolumnach:
+Masz 3 indeksy na osobne kolumny, ale brakuje kluczowego composite index. Na 10M wierszach to będzie ból, ale z większym problemem — całe przetwarzanie jest w Pythonie.
+
+Aktualne query pattern vs 10M wierszy:
+
+# movers, rankings, alerts — WSZYSTKIE robią to:
+all_rows = SELECT * FROM portfolio_composition WHERE user_id = X
+# → ładuje do Pythona np. 500 000 wierszy dla jednego usera
+# → grupowanie, diffowanie, agregacje — w pamięci RAM aplikacji
+
+Gdzie to padnie:
+
+Zapytanie	Teraz (11k)	10M wierszy
+WHERE user_id = X	~1ms	~200ms (index scan, ale duże I/O)
+Python groupby + diff	~5ms	~30s (OOM lub timeout)
+ILIKE company_name	~2ms	~10s (seq scan na user's rows)
+Pairwise Jaccard (45×45)	~50ms	nieprzewidywalny
+
+Brakuje composite index:
+
+-- Większość zapytań filtruje user + date + subfund
+CREATE INDEX idx_pc_user_subfund_date 
+ON portfolio_composition (user_id, subfund_name, snapshot_date);
+
+-- Wyszukiwanie tekstowe
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_pc_company_trgm 
+ON portfolio_composition USING GIN (company_name gin_trgm_ops);
+
+Prawdziwe rozwiązanie na 10M — przenieść logikę do SQL:
+
+Zamiast ładować wszystko do Pythona, np. dla /activity:
+
+-- Zamiast obecnego SELECT * → Python groupby
+SELECT subfund_name,
+       COUNT(DISTINCT snapshot_date) AS snap_count,
+       MAX(snapshot_date)            AS latest_date
+FROM portfolio_composition
+WHERE user_id = 'dev-user'
+GROUP BY subfund_name;
+-- → 1 zapytanie, 45 wierszy zwrotnych zamiast 11 000
+
+Ocena realistyczna:
+
+< 1M wierszy — obecne podejście działa bez zmian
+1–10M wierszy — potrzeba composite index + agregacje w SQL
+> 10M wierszy — rozważyć partycjonowanie tabeli po (user_id, snapshot_date) lub materialized views dla często czytanych agregatów
+Przy Twoim obecnym use case (jedna instancja, kilka TFI kwartalnie) raczej nigdy nie dojdziesz do 10M — to byłoby ~850 uploadów tej samej skali.
